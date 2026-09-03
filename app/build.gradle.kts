@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    // AGP 9.x 已内置 Kotlin 支持（built-in Kotlin），不要再单独应用 org.jetbrains.kotlin.android，
+    // 否则会报 "Cannot add extension with name 'kotlin'"。
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -28,9 +29,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    // built-in Kotlin 下 Kotlin 的 jvmTarget 默认跟随 compileOptions.targetCompatibility(17)，无需 kotlinOptions{}
     buildFeatures {
         compose = true
     }
