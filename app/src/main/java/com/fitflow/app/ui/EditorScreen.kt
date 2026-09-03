@@ -1,8 +1,8 @@
 package com.fitflow.app.ui
 
-import androidx.compose.animation.animateDpAsState
-import androidx.compose.animation.animateFloatAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -48,8 +48,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.hapticfeedback.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,7 +70,6 @@ import com.fitflow.app.ui.theme.Csurface2
 import com.fitflow.app.ui.theme.Csurface3
 import com.fitflow.app.ui.theme.Ctext
 import sh.calvin.reorderable.ReorderableItem
-import sh.calvin.reorderable.longPressDraggableHandle
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
 /** 编辑页 LazyColumn 里「头部配置区」占用的 item 数量，拖动下标换算时要减掉它 */
