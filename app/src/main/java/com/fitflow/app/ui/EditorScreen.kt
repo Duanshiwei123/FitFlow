@@ -3,9 +3,11 @@ package com.fitflow.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,9 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material3.AlertDialog
@@ -29,14 +31,20 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -79,27 +87,52 @@ fun EditorScreen(planId: String, onBack: () -> Unit, onStartAll: (String) -> Uni
     var pickMode by remember { mutableStateOf<String?>("") }
     var pickTrigger by remember { mutableStateOf(0) }
 
+    // 长按拖动重排
+    var dragStartIndex by remember { mutableIntStateOf(-1) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    val itemHeightPx = with(LocalDensity.current) { 132.dp.toPx() }
+    val targetIndex by remember(plan.moves.size) {
+        derivedStateOf {
+            if (dragStartIndex < 0) -1
+            else (dragStartIndex + (dragOffsetY / itemHeightPx).toInt())
+                .coerceIn(0, plan.moves.size - 1)
+        }
+    }
+
     Column(Modifier.fillMaxSize().background(Cbg).statusBarsPadding()) {
         TopBar(title = "编辑计划", onBack = { onBack() }, actions = {
             FfButton("开始", { onStartAll(plan.id) }, primary = true)
         })
-        Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 40.dp)) {
-            OutlinedTextField(value = plan.name, onValueChange = { commit(plan.copy(name = it)) },
-                modifier = Modifier.fillMaxWidth(), singleLine = true,
-                label = { Text("计划名称") }, textStyle = MaterialTheme.typography.titleMedium, colors = tfColors())
-            Spacer(Modifier.size(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Column(Modifier.weight(1f)) { NumberField("开始前准备", plan.prep, "秒", 0, 300, 5) { commit(plan.copy(prep = it)) } }
-                Column(Modifier.weight(1f)) { NumberField("动作间休息", plan.moveRest, "秒", 0, 300, 5) { commit(plan.copy(moveRest = it)) } }
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp, top = 8.dp, bottom = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                OutlinedTextField(value = plan.name, onValueChange = { commit(plan.copy(name = it)) },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true,
+                    label = { Text("计划名称") }, textStyle = MaterialTheme.typography.titleMedium, colors = tfColors())
+                Spacer(Modifier.size(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(Modifier.weight(1f)) { NumberField("开始前准备", plan.prep, "秒", 0, 300, 5) { commit(plan.copy(prep = it)) } }
+                    Column(Modifier.weight(1f)) { NumberField("动作间休息", plan.moveRest, "秒", 0, 300, 5) { commit(plan.copy(moveRest = it)) } }
+                }
+                Spacer(Modifier.size(10.dp))
+                Row { Chip("总时长 " + humanTime(Engine.planDuration(plan)), accent = true) }
+                Spacer(Modifier.size(6.dp))
+                Text("共 ${plan.moves.size} 个动作 · 长按任意动作拖动可调整顺序",
+                    style = MaterialTheme.typography.bodySmall, color = Cmuted)
+                Spacer(Modifier.size(14.dp))
             }
-            Spacer(Modifier.size(10.dp))
-            Row { Chip("总时长 " + humanTime(Engine.planDuration(plan)), accent = true) }
-            Spacer(Modifier.size(6.dp))
-            Text("共 ${plan.moves.size} 个动作 · 训练/休息按下方顺序执行",
-                style = MaterialTheme.typography.bodySmall, color = Cmuted)
-            Spacer(Modifier.size(14.dp))
-
-            plan.moves.forEachIndexed { index, move ->
+            itemsIndexed(plan.moves, key = { _, m -> m.id }) { index, move ->
+                val isDragging = dragStartIndex == index
+                val translationY = when {
+                    dragStartIndex < 0 -> 0f
+                    isDragging -> dragOffsetY
+                    targetIndex > dragStartIndex && index in (dragStartIndex + 1)..targetIndex -> -itemHeightPx
+                    targetIndex < dragStartIndex && index in targetIndex until dragStartIndex -> itemHeightPx
+                    else -> 0f
+                }
                 MoveEditorCard(
                     move = move, index = index, totalMoves = plan.moves.size,
                     open = move.id in expanded,
@@ -110,31 +143,35 @@ fun EditorScreen(planId: String, onBack: () -> Unit, onStartAll: (String) -> Uni
                         if (plan.moves.size > 1)
                             commitMoves(plan.moves.filterIndexed { i, _ -> i != index })
                     },
-                    onMoveUp = {
-                        if (index > 0) {
-                            val l = plan.moves.toMutableList()
-                            val t = l[index]; l[index] = l[index - 1]; l[index - 1] = t
-                            commitMoves(l)
+                    onTryMove = { onStartMove(plan.id, index) },
+                    isDragging = isDragging,
+                    translationY = translationY,
+                    onLongPressStart = { dragStartIndex = index; dragOffsetY = 0f },
+                    onDrag = { dy -> dragOffsetY += dy },
+                    onDragEnd = {
+                        val s = dragStartIndex
+                        val t = targetIndex
+                        if (s >= 0 && t in 0 until plan.moves.size && t != s) {
+                            val nl = plan.moves.toMutableList()
+                            val mv = nl.removeAt(s)
+                            val finalIdx = if (t > s) t - 1 else t
+                            nl.add(finalIdx, mv)
+                            commitMoves(nl)
                         }
+                        dragStartIndex = -1
+                        dragOffsetY = 0f
                     },
-                    onMoveDown = {
-                        if (index < plan.moves.size - 1) {
-                            val l = plan.moves.toMutableList()
-                            val t = l[index]; l[index] = l[index + 1]; l[index + 1] = t
-                            commitMoves(l)
-                        }
-                    },
-                    onTryMove = { onStartMove(plan.id, index) }
+                    onDragCancel = { dragStartIndex = -1; dragOffsetY = 0f }
                 )
-                Spacer(Modifier.size(10.dp))
             }
-
-            Spacer(Modifier.size(6.dp))
-            FfButton("+ 添加动作", { pickMode = ""; pickTrigger++ },
-                modifier = Modifier.fillMaxWidth())
-            Spacer(Modifier.size(8.dp))
-            Text("点「+ 添加动作」从动作库添加（含你自定义的动作）；点动作缩略图可替换动作；点「试练」单独练这一组。",
-                style = MaterialTheme.typography.bodySmall, color = Cmuted)
+            item {
+                Spacer(Modifier.size(6.dp))
+                FfButton("+ 添加动作", { pickMode = ""; pickTrigger++ },
+                    modifier = Modifier.fillMaxWidth())
+                Spacer(Modifier.size(8.dp))
+                Text("点「+ 添加动作」从动作库添加（含你自定义的动作）；点动作缩略图可替换动作；点「试练」单独练一组。",
+                    style = MaterialTheme.typography.bodySmall, color = Cmuted)
+            }
         }
     }
 
@@ -196,9 +233,28 @@ private fun LibraryPickRow(ex: Exercise, onClick: () -> Unit) {
 private fun MoveEditorCard(move: Move, index: Int, totalMoves: Int, open: Boolean,
                            onToggle: () -> Unit, onChange: (Move) -> Unit,
                            onPickFigure: () -> Unit, onDelete: () -> Unit,
-                           onMoveUp: () -> Unit, onMoveDown: () -> Unit, onTryMove: () -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Csurface, RoundedCornerShape(16.dp))
-        .border(1.dp, Cline, RoundedCornerShape(16.dp)).padding(12.dp)) {
+                           onTryMove: () -> Unit,
+                           isDragging: Boolean, translationY: Float,
+                           onLongPressStart: () -> Unit, onDrag: (Float) -> Unit,
+                           onDragEnd: () -> Unit, onDragCancel: () -> Unit) {
+    val cardModifier = Modifier
+        .fillMaxWidth()
+        .graphicsLayer { this.translationY = translationY }
+        .pointerInput(index, totalMoves) {
+            detectDragGesturesAfterLongPress(
+                onDragStart = { onLongPressStart() },
+                onDrag = { change, dragAmount ->
+                    change.consumeAllChanges()
+                    onDrag(dragAmount.y)
+                },
+                onDragEnd = { onDragEnd() },
+                onDragCancel = { onDragCancel() }
+            )
+        }
+        .background(if (isDragging) Csurface3 else Csurface, RoundedCornerShape(16.dp))
+        .border(1.dp, if (isDragging) Caccent.copy(alpha = 0.6f) else Cline, RoundedCornerShape(16.dp))
+        .padding(12.dp)
+    Column(cardModifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(width = 40.dp, height = 44.dp).clickable(onClick = onPickFigure)) {
                 StickFigure(move.figure, 0.25f)
@@ -219,9 +275,10 @@ private fun MoveEditorCard(move: Move, index: Int, totalMoves: Int, open: Boolea
             IconButton(onClick = onToggle) { Icon(Icons.Default.Create, "展开", tint = Cmuted) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            TextButton(onClick = onMoveUp, enabled = index > 0) { Text("上移", color = Cmuted) }
-            TextButton(onClick = onMoveDown, enabled = index < totalMoves - 1) { Text("下移", color = Cmuted) }
             TextButton(onClick = onDelete) { Text("删除", color = Cmuted) }
+            Text(if (isDragging) "拖动中…松手确认新位置" else "长按拖动可调整顺序",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (isDragging) Caccent else Cmuted)
         }
         if (open) {
             Spacer(Modifier.size(4.dp))

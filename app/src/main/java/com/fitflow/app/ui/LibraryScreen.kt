@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import com.fitflow.app.data.Exercise
 import com.fitflow.app.data.Mode
 import com.fitflow.app.data.Store
@@ -73,11 +74,8 @@ fun LibraryScreen() {
     var creating by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Exercise?>(null) }
     var importing by remember { mutableStateOf(false) }
+    var previewUri by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-
-    fun reloadEditing(id: String) {
-        editing = Store.loadLibrary(ctx).firstOrNull { it.id == id }
-    }
 
     fun toast(msg: String) {
         Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
@@ -105,7 +103,7 @@ fun LibraryScreen() {
                 if (!VideoFiles.isNetwork(ex.videoUri)) VideoFiles.deleteIfLocal(ex.videoUri)
                 Store.bindVideo(ctx, ex.id, path)
                 tick++
-                reloadEditing(ex.id)
+                editing = null           // 绑完直接关掉弹窗，列表会显示 ▶ 预览
                 toast("视频已添加 ✓")
             }
         }
@@ -127,7 +125,8 @@ fun LibraryScreen() {
                 itemsIndexed(all) { _, ex ->
                     ExerciseCard(
                         ex = ex,
-                        onClick = { editing = ex }
+                        onClick = { editing = ex },
+                        onPreview = { previewUri = ex.videoUri }
                     )
                 }
             }
@@ -249,11 +248,21 @@ fun LibraryScreen() {
                         if (!VideoFiles.isNetwork(ex.videoUri)) VideoFiles.deleteIfLocal(ex.videoUri)
                         Store.bindVideo(ctx, ex.id, t)
                         tick++
+                        editing = null
+                        toast("链接已添加 ✓")
+                    } else {
+                        toast("链接需以 http:// 或 https:// 开头")
                     }
                 }
             )
         }
     }
+
+    // 全屏视频预览
+    previewUri?.let { uri ->
+        PreviewVideoDialog(uri = uri, onDismiss = { previewUri = null })
+    }
+}
 }
 
 @Composable
@@ -262,7 +271,7 @@ private fun TextButtonText(text: String, color: Color, enabled: Boolean = true, 
 }
 
 @Composable
-private fun ExerciseCard(ex: Exercise, onClick: () -> Unit) {
+private fun ExerciseCard(ex: Exercise, onClick: () -> Unit, onPreview: () -> Unit) {
     Column(Modifier.fillMaxWidth().background(Csurface, RoundedCornerShape(16.dp))
         .border(1.dp, Cline, RoundedCornerShape(16.dp))
         .clickable(onClick = onClick).padding(12.dp)) {
@@ -273,13 +282,39 @@ private fun ExerciseCard(ex: Exercise, onClick: () -> Unit) {
                 Text(ex.name, style = MaterialTheme.typography.titleMedium, color = Ctext,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(if (ex.builtin) "内置动作 · 可绑定自己的跟练视频"
-                else "我的动作 · 点击绑定视频",
+                else "我的动作 · 长按卡片拖动改变列表顺序",
                     style = MaterialTheme.typography.bodySmall, color = Cmuted)
             }
-            Chip(if (VideoFiles.usable(ex.videoUri)) "▶ 视频" else "无视频",
-                accent = VideoFiles.usable(ex.videoUri))
+            if (VideoFiles.usable(ex.videoUri)) {
+                // 视频 chip：单独可点击，触发预览（不让 Card 整体 onClick 触发）
+                Box(Modifier.clickable(onClick = onPreview)) {
+                    Chip("▶ 预览", accent = true)
+                }
+            } else {
+                Chip("无视频")
+            }
         }
     }
+}
+
+/** 视频预览全屏弹窗：使用 ExoPlayer 循环播放一段视频 */
+@Composable
+private fun PreviewVideoDialog(uri: String, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Csurface,
+        titleContentColor = Ctext,
+        textContentColor = Ctext,
+        title = { Text("预览视频") },
+        text = {
+            LoopVideoPlayer(uri = uri, playing = true,
+                modifier = Modifier.fillMaxWidth().aspectRatio(9f / 16f))
+        },
+        confirmButton = {
+            TextButtonText("关闭", Ctext) { onDismiss() }
+        },
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    )
 }
 
 private fun fileName(uri: String): String {
