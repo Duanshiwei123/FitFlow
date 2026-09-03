@@ -1,5 +1,6 @@
 package com.fitflow.app.ui
 
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -33,8 +34,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -67,20 +72,41 @@ fun LibraryScreen() {
 
     var creating by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Exercise?>(null) }
+    var importing by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    // 本地视频选择（系统文件选择器，限定 video）
+    fun reloadEditing(id: String) {
+        editing = Store.loadLibrary(ctx).firstOrNull { it.id == id }
+    }
+
+    fun toast(msg: String) {
+        Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+    }
+
+    // 本地视频选择：兼容「单击即返回」和「长按多选后点添加」，统一取第一个
     val videoPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
         editing?.let { ex ->
-            if (uri != null) {
-                val path = VideoFiles.import(ctx, uri)
-                if (path != null) {
-                    // 替换前删除旧本地文件
-                    if (!VideoFiles.isNetwork(ex.videoUri)) VideoFiles.deleteIfLocal(ex.videoUri)
-                    Store.bindVideo(ctx, ex.id, path)
-                    tick++
+            val uri = uris.firstOrNull()
+            if (uri == null) {
+                toast("未获取到视频，请重新选择")
+                return@let
+            }
+            importing = true
+            scope.launch {
+                val path = withContext(Dispatchers.IO) { VideoFiles.import(ctx, uri) }
+                importing = false
+                if (path == null) {
+                    toast("视频导入失败，请换一个文件试试")
+                    return@launch
                 }
+                // 替换前删除旧本地文件
+                if (!VideoFiles.isNetwork(ex.videoUri)) VideoFiles.deleteIfLocal(ex.videoUri)
+                Store.bindVideo(ctx, ex.id, path)
+                tick++
+                reloadEditing(ex.id)
+                toast("视频已添加 ✓")
             }
         }
     }
@@ -173,10 +199,14 @@ fun LibraryScreen() {
                         }
                     }
                     TextButtonText("粘贴链接", Caccent) { linkMode = true }
-                    TextButtonText("选择本地视频", Caccent) {
-                        videoPicker.launch("video/*")
+                    TextButtonText(
+                        if (importing) "导入中…" else "选择本地视频",
+                        Caccent,
+                        enabled = !importing
+                    ) {
+                        if (!importing) videoPicker.launch("video/*")
                     }
-                    TextButtonText("完成", Ctext) { editing = null }
+                    TextButtonText("完成", Ctext, enabled = !importing) { if (!importing) editing = null }
                 }
             },
             dismissButton = {
@@ -227,8 +257,8 @@ fun LibraryScreen() {
 }
 
 @Composable
-private fun TextButtonText(text: String, color: Color, onClick: () -> Unit) {
-    androidx.compose.material3.TextButton(onClick = onClick) { Text(text, color = color) }
+private fun TextButtonText(text: String, color: Color, enabled: Boolean = true, onClick: () -> Unit) {
+    androidx.compose.material3.TextButton(onClick = onClick, enabled = enabled) { Text(text, color = color) }
 }
 
 @Composable
