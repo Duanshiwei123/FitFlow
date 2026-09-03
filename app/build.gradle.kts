@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.fitflow.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.fitflow.app"
@@ -36,7 +36,10 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
+    // 9/2 升级时 AS 模板的 libs.versions.toml 指定 composeBom=2026.02.01，此处对齐。
+    // EditorScreen 用到较新 Compose API（HapticFeedbackType.SegmentFrequentTick/GestureEnd 等、
+    // longPressDraggableHandle），旧 BOM(2024.12.01) 里不存在，会编译不过。
+    val composeBom = platform("androidx.compose:compose-bom:2026.02.01")
     implementation(composeBom)
 
     implementation("androidx.core:core-ktx:1.15.0")
@@ -44,6 +47,8 @@ dependencies {
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
+    // animateDpAsState/animateFloatAsState 在 animation 库，material3 不传递它，需显式声明
+    implementation("androidx.compose.animation:animation")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
