@@ -19,6 +19,9 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Reorderable 是 KMP 库，只发布了 debug 变体、没有 release 变体。
+            // 不回退的话 Gradle 变体匹配会找不到 release 构件导致 Sync/构建失败。
+            matchingFallbacks += "debug"
         }
     }
     compileOptions {
