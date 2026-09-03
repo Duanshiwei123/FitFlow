@@ -47,4 +47,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+
+    // 丝滑拖拽排序：长按卡片拖动 + 平滑让位动画（Calvin-LL/Reorderable）
+    implementation("sh.calvin.reorderable:reorderable:3.1.0")
 }

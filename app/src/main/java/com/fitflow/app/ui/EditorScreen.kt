@@ -1,9 +1,13 @@
 package com.fitflow.app.ui
 
+import androidx.compose.animation.animateDpAsState
+import androidx.compose.animation.animateFloatAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +23,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -33,23 +38,22 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.hapticfeedback.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.fitflow.app.data.Exercise
 import com.fitflow.app.data.Mode
 import com.fitflow.app.data.Move
@@ -65,6 +69,12 @@ import com.fitflow.app.ui.theme.Csurface
 import com.fitflow.app.ui.theme.Csurface2
 import com.fitflow.app.ui.theme.Csurface3
 import com.fitflow.app.ui.theme.Ctext
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.longPressDraggableHandle
+import sh.calvin.reorderable.rememberReorderableLazyListState
+
+/** 编辑页 LazyColumn 里「头部配置区」占用的 item 数量，拖动下标换算时要减掉它 */
+private const val HEADER_ITEMS = 1
 
 /** 计划编辑页 */
 @Composable
@@ -89,15 +99,22 @@ fun EditorScreen(planId: String, onBack: () -> Unit, onStartAll: (String) -> Uni
     var pickMode by remember { mutableStateOf<String?>("") }
     var pickTrigger by remember { mutableStateOf(0) }
 
-    // 长按拖动重排
-    var dragStartIndex by remember { mutableIntStateOf(-1) }
-    var dragOffsetY by remember { mutableFloatStateOf(0f) }
-    val itemHeightPx = with(LocalDensity.current) { 132.dp.toPx() }
-    val targetIndex by remember(plan.moves.size) {
-        derivedStateOf {
-            if (dragStartIndex < 0) -1
-            else (dragStartIndex + (dragOffsetY / itemHeightPx).toInt())
-                .coerceIn(0, plan.moves.size - 1)
+    val haptic = LocalHapticFeedback.current
+    // 库内部会缓存 onMove 回调，必须用 rememberUpdatedState 才能读到最新的动作列表
+    val currentMoves by rememberUpdatedState(plan.moves)
+
+    // 丝滑重排：由 Reorderable 库负责让位动画 / 跟手 / 边缘自动滚动
+    val lazyListState = rememberLazyListState()
+    val reorderState = rememberReorderableLazyListState(lazyListState) { from, to ->
+        val moves = currentMoves
+        if (moves.size >= 2) {
+            // LazyColumn 的全局下标含头部配置区，换算成 plan.moves 的下标
+            val fromIdx = (from.index - HEADER_ITEMS).coerceIn(0, moves.lastIndex)
+            val toIdx = (to.index - HEADER_ITEMS).coerceIn(0, moves.lastIndex)
+            if (fromIdx != toIdx) {
+                commitMoves(moves.toMutableList().apply { add(toIdx, removeAt(fromIdx)) })
+                haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+            }
         }
     }
 
@@ -107,6 +124,7 @@ fun EditorScreen(planId: String, onBack: () -> Unit, onStartAll: (String) -> Uni
         })
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
+            state = lazyListState,
             contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -127,44 +145,32 @@ fun EditorScreen(planId: String, onBack: () -> Unit, onStartAll: (String) -> Uni
                 Spacer(Modifier.size(14.dp))
             }
             itemsIndexed(plan.moves, key = { _, m -> m.id }) { index, move ->
-                val isDragging = dragStartIndex == index
-                val translationY = when {
-                    dragStartIndex < 0 -> 0f
-                    isDragging -> dragOffsetY
-                    targetIndex > dragStartIndex && index in (dragStartIndex + 1)..targetIndex -> -itemHeightPx
-                    targetIndex < dragStartIndex && index in targetIndex until dragStartIndex -> itemHeightPx
-                    else -> 0f
+                ReorderableItem(reorderState, key = move.id) { isDragging ->
+                    val interactionSource = remember { MutableInteractionSource() }
+                    MoveEditorCard(
+                        move = move, index = index, totalMoves = plan.moves.size,
+                        open = move.id in expanded,
+                        onToggle = { expanded = if (move.id in expanded) expanded - move.id else expanded + move.id },
+                        onChange = { commitMoves(plan.moves.mapIndexed { i, m -> if (i == index) it else m }) },
+                        onPickFigure = { pickMode = move.id; pickTrigger++ },
+                        onDelete = {
+                            if (plan.moves.size > 1)
+                                commitMoves(plan.moves.filterIndexed { i, _ -> i != index })
+                        },
+                        onTryMove = { onStartMove(plan.id, index) },
+                        isDragging = isDragging,
+                        // 整张卡片都能长按拖动，和原来的交互一致
+                        dragHandle = Modifier.longPressDraggableHandle(
+                            onDragStarted = {
+                                haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                            },
+                            onDragStopped = {
+                                haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                            },
+                            interactionSource = interactionSource
+                        )
+                    )
                 }
-                MoveEditorCard(
-                    move = move, index = index, totalMoves = plan.moves.size,
-                    open = move.id in expanded,
-                    onToggle = { expanded = if (move.id in expanded) expanded - move.id else expanded + move.id },
-                    onChange = { commitMoves(plan.moves.mapIndexed { i, m -> if (i == index) it else m }) },
-                    onPickFigure = { pickMode = move.id; pickTrigger++ },
-                    onDelete = {
-                        if (plan.moves.size > 1)
-                            commitMoves(plan.moves.filterIndexed { i, _ -> i != index })
-                    },
-                    onTryMove = { onStartMove(plan.id, index) },
-                    isDragging = isDragging,
-                    translationY = translationY,
-                    onLongPressStart = { dragStartIndex = index; dragOffsetY = 0f },
-                    onDrag = { dy -> dragOffsetY += dy },
-                    onDragEnd = {
-                        val s = dragStartIndex
-                        val t = targetIndex
-                        if (s >= 0 && t in 0 until plan.moves.size && t != s) {
-                            val nl = plan.moves.toMutableList()
-                            val mv = nl.removeAt(s)
-                            val finalIdx = if (t > s) t - 1 else t
-                            nl.add(finalIdx, mv)
-                            commitMoves(nl)
-                        }
-                        dragStartIndex = -1
-                        dragOffsetY = 0f
-                    },
-                    onDragCancel = { dragStartIndex = -1; dragOffsetY = 0f }
-                )
             }
             item {
                 Spacer(Modifier.size(6.dp))
@@ -236,25 +242,31 @@ private fun MoveEditorCard(move: Move, index: Int, totalMoves: Int, open: Boolea
                            onToggle: () -> Unit, onChange: (Move) -> Unit,
                            onPickFigure: () -> Unit, onDelete: () -> Unit,
                            onTryMove: () -> Unit,
-                           isDragging: Boolean, translationY: Float,
-                           onLongPressStart: () -> Unit, onDrag: (Float) -> Unit,
-                           onDragEnd: () -> Unit, onDragCancel: () -> Unit) {
+                           isDragging: Boolean, dragHandle: Modifier) {
+    // 拎起来时轻微放大 + 浮起阴影，用 spring 收尾，松手有轻微回弹
+    val scale by animateFloatAsState(
+        targetValue = if (isDragging) 1.03f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "dragScale"
+    )
+    val elevation by animateDpAsState(
+        targetValue = if (isDragging) 10.dp else 0.dp,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "dragElevation"
+    )
+    val cardShape = RoundedCornerShape(16.dp)
     val cardModifier = Modifier
         .fillMaxWidth()
-        .graphicsLayer { this.translationY = translationY }
-        .pointerInput(index, totalMoves) {
-            detectDragGesturesAfterLongPress(
-                onDragStart = { onLongPressStart() },
-                onDrag = { change, dragAmount ->
-                    change.consume()
-                    onDrag(dragAmount.y)
-                },
-                onDragEnd = { onDragEnd() },
-                onDragCancel = { onDragCancel() }
-            )
+        .then(dragHandle)
+        .zIndex(if (isDragging) 1f else 0f)
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            shadowElevation = elevation.toPx()
+            shape = cardShape
         }
-        .background(if (isDragging) Csurface3 else Csurface, RoundedCornerShape(16.dp))
-        .border(1.dp, if (isDragging) Caccent.copy(alpha = 0.6f) else Cline, RoundedCornerShape(16.dp))
+        .background(if (isDragging) Csurface3 else Csurface, cardShape)
+        .border(1.dp, if (isDragging) Caccent.copy(alpha = 0.6f) else Cline, cardShape)
         .padding(12.dp)
     Column(cardModifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
