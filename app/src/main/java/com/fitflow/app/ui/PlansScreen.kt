@@ -51,7 +51,8 @@ import com.fitflow.app.ui.theme.Csurface2
 import com.fitflow.app.ui.theme.Ctext
 
 @Composable
-fun PlansScreen(onStartPlan: (String) -> Unit, onEditPlan: (String) -> Unit) {
+fun PlansScreen(onStartPlan: (String) -> Unit, onEditPlan: (String) -> Unit,
+                onGoLibrary: (() -> Unit)? = null) {
     val ctx = LocalContext.current
     var tick by remember { mutableIntStateOf(0) }
     val all = Store.loadPlans(ctx)
@@ -65,11 +66,19 @@ fun PlansScreen(onStartPlan: (String) -> Unit, onEditPlan: (String) -> Unit) {
             Text("变成能直接跟练的", style = MaterialTheme.typography.headlineMedium, color = Ctext)
             Row { Text("节奏", style = MaterialTheme.typography.headlineMedium, color = Caccent) }
             Spacer(Modifier.size(6.dp))
-            Text("输入动作、个数、组数与间歇 —— 自动生成带节拍、语音和示范的跟练流程。",
+            Text("输入动作、个数、组数与间歇 —— 自动生成带语音和示范视频的跟练流程。",
                 style = MaterialTheme.typography.bodySmall, color = Cmuted)
+            if (onGoLibrary != null) {
+                Spacer(Modifier.size(10.dp))
+                Box {
+                    FfButton("🎬 去动作库给动作绑跟练视频", onGoLibrary,
+                        modifier = Modifier.fillMaxWidth())
+                }
+            }
         }
         Spacer(Modifier.size(12.dp))
         LazyColumn(
+            modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp)
         ) {

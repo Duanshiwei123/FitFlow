@@ -3,7 +3,6 @@ package com.fitflow.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -35,19 +35,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.fitflow.app.data.Exercise
 import com.fitflow.app.data.Mode
 import com.fitflow.app.data.Move
-import com.fitflow.app.data.MOVE_LIBRARY
 import com.fitflow.app.data.Plan
 import com.fitflow.app.data.Store
-import com.fitflow.app.data.libMove
-import com.fitflow.app.data.newMoveFromLib
+import com.fitflow.app.data.VideoFiles
 import com.fitflow.app.engine.Engine
 import com.fitflow.app.ui.theme.Caccent
 import com.fitflow.app.ui.theme.Cbg
@@ -58,6 +56,7 @@ import com.fitflow.app.ui.theme.Csurface2
 import com.fitflow.app.ui.theme.Csurface3
 import com.fitflow.app.ui.theme.Ctext
 
+/** 计划编辑页 */
 @Composable
 fun EditorScreen(planId: String, onBack: () -> Unit, onStartAll: (String) -> Unit,
                  onStartMove: (String, Int) -> Unit) {
@@ -76,7 +75,9 @@ fun EditorScreen(planId: String, onBack: () -> Unit, onStartAll: (String) -> Uni
     fun commitMoves(newMoves: List<Move>) = commit(plan.copy(moves = newMoves))
 
     var expanded by remember { mutableStateOf(setOf<String>()) }
-    var libPickMoveId by remember { mutableStateOf<String?>(null) }
+    // 选动作弹窗模式：""=追加新动作；moveId=替换该动作
+    var pickMode by remember { mutableStateOf<String?>("") }
+    var pickTrigger by remember { mutableStateOf(0) }
 
     Column(Modifier.fillMaxSize().background(Cbg).statusBarsPadding()) {
         TopBar(title = "编辑计划", onBack = { onBack() }, actions = {
@@ -104,7 +105,7 @@ fun EditorScreen(planId: String, onBack: () -> Unit, onStartAll: (String) -> Uni
                     open = move.id in expanded,
                     onToggle = { expanded = if (move.id in expanded) expanded - move.id else expanded + move.id },
                     onChange = { commitMoves(plan.moves.mapIndexed { i, m -> if (i == index) it else m }) },
-                    onPickFigure = { libPickMoveId = move.id },
+                    onPickFigure = { pickMode = move.id; pickTrigger++ },
                     onDelete = {
                         if (plan.moves.size > 1)
                             commitMoves(plan.moves.filterIndexed { i, _ -> i != index })
@@ -129,46 +130,65 @@ fun EditorScreen(planId: String, onBack: () -> Unit, onStartAll: (String) -> Uni
             }
 
             Spacer(Modifier.size(6.dp))
-            FfButton("+ 添加动作", { commitMoves(plan.moves + newMoveFromLib("jumpingJack")) },
+            FfButton("+ 添加动作", { pickMode = ""; pickTrigger++ },
                 modifier = Modifier.fillMaxWidth())
             Spacer(Modifier.size(8.dp))
-            Text("点动作右侧铅笔展开编辑；点缩略图换动作类型；点「试练」单独练这一组。",
+            Text("点「+ 添加动作」从动作库添加（含你自定义的动作）；点动作缩略图可替换动作；点「试练」单独练这一组。",
                 style = MaterialTheme.typography.bodySmall, color = Cmuted)
         }
     }
 
-    // 动作库选择
-    libPickMoveId?.let { moveId ->
-        val mv = plan.moves.firstOrNull { it.id == moveId } ?: return@let
-        var selectKey by remember(moveId) { mutableStateOf(mv.figure) }
-        AlertDialog(onDismissRequest = { libPickMoveId = null }, containerColor = Csurface,
-            titleContentColor = Ctext, textContentColor = Ctext, title = { Text("选择动作") },
+    // 动作库选择弹窗
+    if (pickTrigger > 0 && pickMode != null) {
+        val library = remember(pickTrigger) { Store.loadLibrary(ctx) }
+        var target by remember { mutableStateOf(pickMode) }
+        AlertDialog(onDismissRequest = { pickMode = null },
+            containerColor = Csurface, titleContentColor = Ctext, textContentColor = Ctext,
+            title = { Text(if (target == "") "从动作库添加动作" else "更换动作") },
             text = {
-                Column(Modifier.horizontalScroll(rememberScrollState())) {
-                    MOVE_LIBRARY.forEach { l ->
-                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                            .background(if (selectKey == l.key) Csurface3 else Color.Transparent)
-                            .clickable { selectKey = l.key }.padding(vertical = 8.dp, horizontal = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(30.dp, 34.dp)) { StickFigure(l.key, 0.25f) }
-                            Spacer(Modifier.size(8.dp))
-                            Text(l.name, style = MaterialTheme.typography.bodyLarge, color = Ctext)
-                        }
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    library.forEach { ex ->
+                        LibraryPickRow(ex = ex, onClick = {
+                            val mv = ex.toMove()
+                            if (target == "") {
+                                commitMoves(plan.moves + mv)
+                            } else {
+                                commitMoves(plan.moves.map {
+                                    if (it.id == target) it.copy(name = mv.name, figure = mv.figure,
+                                        mode = mv.mode, value = mv.value, sets = mv.sets, rest = mv.rest,
+                                        tempo = mv.tempo, tip = mv.tip, videoUri = mv.videoUri)
+                                    else it
+                                })
+                            }
+                            pickMode = null
+                        })
                     }
+                    Text("（自定义动作可先在「动作库」页绑定跟练视频）",
+                        style = MaterialTheme.typography.bodySmall, color = Cmuted)
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    libPickMoveId = null
-                    val l = libMove(selectKey)
-                    commitMoves(plan.moves.map {
-                        if (it.id == moveId) it.copy(name = l.name, figure = l.key, mode = l.mode,
-                            value = l.value, sets = l.sets, rest = l.rest, tempo = l.tempo, tip = l.tip)
-                        else it
-                    })
-                }) { Text("应用", color = Caccent, fontWeight = FontWeight.Bold) }
-            },
-            dismissButton = { TextButton(onClick = { libPickMoveId = null }) { Text("取消", color = Cmuted) } })
+                TextButton(onClick = { pickMode = null }) { Text("取消", color = Cmuted) }
+            })
+    }
+}
+
+@Composable
+private fun LibraryPickRow(ex: Exercise, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth()
+        .background(Color.Transparent)
+        .clickable(onClick = onClick).padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(32.dp, 36.dp)) { StickFigure(ex.figure, 0.25f) }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(ex.name, style = MaterialTheme.typography.bodyLarge, color = Ctext,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (VideoFiles.usable(ex.videoUri)) "含跟练视频" else "暂无视频",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (VideoFiles.usable(ex.videoUri)) Caccent else Cmuted)
+        }
+        if (ex.videoUri != null) Chip("▶", accent = true)
     }
 }
 
@@ -185,8 +205,14 @@ private fun MoveEditorCard(move: Move, index: Int, totalMoves: Int, open: Boolea
             }
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f).clickable(onClick = onToggle)) {
-                Text(move.name, style = MaterialTheme.typography.titleMedium, color = Ctext,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(move.name, style = MaterialTheme.typography.titleMedium, color = Ctext,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                    if (VideoFiles.usable(move.videoUri)) {
+                        Spacer(Modifier.width(6.dp))
+                        Chip("视频", accent = true)
+                    }
+                }
                 Text(moveSummary(move), style = MaterialTheme.typography.bodySmall, color = Cmuted)
             }
             TextButton(onClick = onTryMove) { Text("试练", color = Caccent) }
@@ -236,7 +262,10 @@ private fun MoveFields(move: Move, onChange: (Move) -> Unit, onPickFigure: () ->
         modifier = Modifier.fillMaxWidth(), label = { Text("动作要点（开练前播报）") },
         textStyle = MaterialTheme.typography.bodyMedium, colors = tfColors())
     Spacer(Modifier.size(8.dp))
-    TextButton(onClick = onPickFigure) { Text("更换动作类型…", color = Caccent) }
+    TextButton(onClick = onPickFigure) { Text("更换动作…", color = Caccent) }
+    if (VideoFiles.usable(move.videoUri)) {
+        Text("🎬 已绑定示范视频（跟练时会播放）", style = MaterialTheme.typography.bodySmall, color = Caccent)
+    }
 }
 
 @Composable

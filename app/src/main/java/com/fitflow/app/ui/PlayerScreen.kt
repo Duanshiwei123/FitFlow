@@ -53,6 +53,7 @@ import com.fitflow.app.data.Mode
 import com.fitflow.app.data.Move
 import com.fitflow.app.data.Plan
 import com.fitflow.app.data.Store
+import com.fitflow.app.data.VideoFiles
 import com.fitflow.app.engine.Engine
 import com.fitflow.app.engine.Ev
 import com.fitflow.app.engine.EvType
@@ -113,12 +114,19 @@ fun PlayerScreen(planId: String, onlyIndex: Int?, audio: AudioEngine, onExit: ()
         stepStart = audio.now().toFloat()
     }
 
+    /** 当前训练组是否正在放示范视频（有视频时跳过合成音/语音，只听视频原声） */
+    fun demoActive(): Boolean {
+        val s = steps[idx.coerceIn(0, steps.size - 1)]
+        if (s.kind != StepKind.WORK) return false
+        return source.moves.getOrNull(s.moveIndex)?.videoUri?.let { VideoFiles.usable(it) } == true
+    }
+
     fun fire(e: Ev) {
+        if (demoActive()) return
+        // 节拍器已移除：不再播放 beat / beatAccent 提示音
+        if (e.sound == "beat" || e.sound == "beatAccent") return
         if (e.type == EvType.SPEAK) audio.speak(e.text)
-        else {
-            audio.cue(e.sound)
-            if (e.sound == "beat" || e.sound == "beatAccent") lastBeatT = audio.now().toFloat()
-        }
+        else audio.cue(e.sound)
     }
 
     fun refreshView(el: Float) {
@@ -178,6 +186,10 @@ fun PlayerScreen(planId: String, onlyIndex: Int?, audio: AudioEngine, onExit: ()
     val unit = if (showRep) "/ ${st.target} 个" else "秒"
     val beatGlow = lastBeatT >= 0 && (audio.now() - lastBeatT) < 0.16f
 
+    // 当前训练组若有可用示范视频，则优先播放视频代替火柴人
+    val curMove = source.moves.getOrNull(st.moveIndex)
+    val demoVideo = if (isWork) curMove?.videoUri?.takeIf { VideoFiles.usable(it) } else null
+
     Column(Modifier.fillMaxSize().background(Cbg).navigationBarsPadding()) {
         Column(Modifier.fillMaxWidth().statusBarsPadding()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -210,31 +222,60 @@ fun PlayerScreen(planId: String, onlyIndex: Int?, audio: AudioEngine, onExit: ()
         } else {
             Column(Modifier.fillMaxWidth().weight(1f).padding(horizontal = 18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.fillMaxWidth().aspectRatio(1.25f).padding(top = 4.dp)
-                    .background(Color(0x0AFFFFFF), RoundedCornerShape(22.dp))
-                    .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(22.dp))) {
-                    StickFigure(st.figure, phase, Modifier.fillMaxSize().padding(6.dp))
-                }
-                Spacer(Modifier.size(8.dp))
-                Text(st.title, style = MaterialTheme.typography.titleLarge, color = Ctext)
-                Text(st.sub, style = MaterialTheme.typography.bodyMedium, color = Cmuted)
-                Spacer(Modifier.size(4.dp))
-                Box(Modifier.size(210.dp), contentAlignment = Alignment.Center) {
-                    Ring(progress = progress, color = if (isRest) Caccent2 else Caccent)
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(bigNum, color = numColor, fontWeight = FontWeight.ExtraBold,
-                            fontSize = 64.sp, lineHeight = 72.sp,
-                            modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
-                        Text(unit, color = Cmuted, style = MaterialTheme.typography.bodyMedium)
+                if (demoVideo != null) {
+                    // 训练组：播放用户绑定的示范视频（弹性占满剩余高度）
+                    Box(Modifier.fillMaxWidth().weight(1f).padding(top = 4.dp, bottom = 2.dp)) {
+                        LoopVideoPlayer(
+                            uri = demoVideo,
+                            playing = !paused && !finished,
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
-                }
-                Spacer(Modifier.size(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(10.dp).background(
-                        if (beatGlow && settings.beat) Caccent else Color(0x40FFFFFF), CircleShape))
+                    Text(st.title, style = MaterialTheme.typography.titleLarge, color = Ctext)
+                    Text(st.sub, style = MaterialTheme.typography.bodyMedium, color = Cmuted)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                        Box(Modifier.size(width = 96.dp, height = 96.dp), contentAlignment = Alignment.Center) {
+                            Ring(progress = progress, color = Caccent)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(bigNum, color = numColor, fontWeight = FontWeight.ExtraBold,
+                                    fontSize = 34.sp, lineHeight = 38.sp,
+                                    modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                                Text(unit, color = Cmuted, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        Spacer(Modifier.size(16.dp))
+                        if (st.next.isNotEmpty())
+                            Text("接下来\n${st.next}", color = Cmuted, style = MaterialTheme.typography.bodySmall,
+                                maxLines = 2)
+                    }
+                } else {
+                    Box(Modifier.fillMaxWidth().aspectRatio(1.25f).padding(top = 4.dp)
+                        .background(Color(0x0AFFFFFF), RoundedCornerShape(22.dp))
+                        .border(1.dp, Color(0x14FFFFFF), RoundedCornerShape(22.dp))) {
+                        StickFigure(st.figure, phase, Modifier.fillMaxSize().padding(6.dp))
+                    }
                     Spacer(Modifier.size(8.dp))
-                    if (st.next.isNotEmpty())
-                        Text("接下来 ${st.next}", color = Cmuted, style = MaterialTheme.typography.bodyMedium)
+                    Text(st.title, style = MaterialTheme.typography.titleLarge, color = Ctext)
+                    Text(st.sub, style = MaterialTheme.typography.bodyMedium, color = Cmuted)
+                    Spacer(Modifier.size(4.dp))
+                    Box(Modifier.size(210.dp), contentAlignment = Alignment.Center) {
+                        Ring(progress = progress, color = if (isRest) Caccent2 else Caccent)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(bigNum, color = numColor, fontWeight = FontWeight.ExtraBold,
+                                fontSize = 64.sp, lineHeight = 72.sp,
+                                modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
+                            Text(unit, color = Cmuted, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    Spacer(Modifier.size(2.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(10.dp).background(
+                            if (beatGlow && settings.beat) Caccent else Color(0x40FFFFFF), CircleShape))
+                        Spacer(Modifier.size(8.dp))
+                        if (st.next.isNotEmpty())
+                            Text("接下来 ${st.next}", color = Cmuted, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),

@@ -97,7 +97,7 @@ private fun poseLines(figure: String, p: Float): List<Seg> {
                 seg(72f, 56f, 84f, 64f + 14f * lift)
             )
         }
-        else -> { // jumpingJack 等
+        "generic", "jumpingJack", "highKnees2" -> { // 自定义动作占位/开合跳
             val open = w
             listOf(
                 seg(66f, 50f - 3f * open, 66f, 92f),
