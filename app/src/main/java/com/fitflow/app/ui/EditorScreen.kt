@@ -19,7 +19,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Create
 import androidx.compose.material3.AlertDialog
@@ -105,7 +107,7 @@ fun EditorScreen(planId: String, onBack: () -> Unit, onStartAll: (String) -> Uni
         })
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 16.dp, top = 8.dp, bottom = 40.dp),
+            contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 40.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
@@ -244,7 +246,7 @@ private fun MoveEditorCard(move: Move, index: Int, totalMoves: Int, open: Boolea
             detectDragGesturesAfterLongPress(
                 onDragStart = { onLongPressStart() },
                 onDrag = { change, dragAmount ->
-                    change.consumeAllChanges()
+                    change.consume()
                     onDrag(dragAmount.y)
                 },
                 onDragEnd = { onDragEnd() },
